@@ -1,18 +1,18 @@
 /**
- * API Route: Send Push Notification (FCM Server-side)
+ * API Route: Send Push Notification (FCM)
  *
  * POST /api/send-notification
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import admin from "firebase-admin";
-import { getUserDeviceTokens, deleteDeviceToken } from "@/lib/database";
+import {
+  getUserDeviceTokens,
+  deleteDeviceToken,
+} from "@/lib/database";
 
-// Initialize Firebase Admin SDK
 function initFirebaseAdmin() {
-  if (admin.apps.length > 0) {
-    return;
-  }
+  if (admin.apps.length > 0) return;
 
   const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
@@ -20,7 +20,7 @@ function initFirebaseAdmin() {
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
-      "Firebase Admin credentials are not set in environment variables."
+      "Firebase Admin credentials are missing."
     );
   }
 
@@ -39,87 +39,160 @@ export async function POST(request: NextRequest) {
 
     if (!receiverId) {
       return NextResponse.json(
-        { success: false, error: "Missing receiverId parameter." },
+        {
+          success: false,
+          error: "receiverId is required",
+        },
         { status: 400 }
       );
     }
 
-    // 1. Fetch registered device tokens for receiver
+    initFirebaseAdmin();
+
     const tokens = await getUserDeviceTokens(receiverId);
+
+    console.log("Receiver:", receiverId);
+    console.log("Tokens:", tokens);
+
     if (!tokens || tokens.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No device tokens registered for receiver. Push skipped.",
+        message: "Receiver has no registered device tokens.",
       });
     }
 
-    // 2. Initialize Firebase Admin SDK
-    initFirebaseAdmin();
-
-    // 3. Send multicast FCM notification
-    const payload = {
+    const payload: admin.messaging.MulticastMessage = {
       tokens,
+
       notification: {
         title: "❤️ Someone is thinking about you",
         body: message || "Open Heartbeat",
       },
+
       data: {
-        senderId: senderId || "",
-        receiverId: receiverId || "",
-        click_action: "/home",
+        senderId: senderId ?? "",
+        receiverId: receiverId ?? "",
+        url: "/home",
       },
-      android: {
-        priority: "high" as const,
+
+      webpush: {
+        headers: {
+          Urgency: "high",
+        },
+
         notification: {
-          icon: "stock_ticker_update",
-          color: "#f43f5e",
+          title: "❤️ Someone is thinking about you",
+          body: message || "Open Heartbeat",
+
+          icon: "/icons/icon-192.png",
+          badge: "/icons/badge-72.png",
+
+          requireInteraction: true,
+
+          vibrate: [200, 100, 200],
+
+          data: {
+            url: "/home",
+          },
+        },
+
+        fcmOptions: {
+          link: "/home",
         },
       },
+
+      android: {
+        priority: "high",
+
+        notification: {
+          channelId: "default",
+          color: "#f43f5e",
+          sound: "default",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+
       apns: {
+        headers: {
+          "apns-push-type": "alert",
+          "apns-priority": "10",
+        },
+
         payload: {
           aps: {
             alert: {
               title: "❤️ Someone is thinking about you",
               body: message || "Open Heartbeat",
             },
-            sound: "default",
+
             badge: 1,
+
+            sound: "default",
+
+            mutableContent: true,
+
+            contentAvailable: true,
           },
         },
       },
     };
 
-    const response = await admin.messaging().sendEachForMulticast(payload);
+    const response =
+      await admin.messaging().sendEachForMulticast(payload);
 
-    // 4. Handle expired or invalid tokens automatically
-    const tokensToDelete: string[] = [];
-    response.responses.forEach((res, idx) => {
-      if (!res.success && res.error) {
-        const errCode = res.error.code;
+    console.log("FCM Response");
+    console.log("Success:", response.successCount);
+    console.log("Failure:", response.failureCount);
+
+    const invalidTokens: string[] = [];
+
+    response.responses.forEach((result, index) => {
+      if (!result.success) {
+        console.error(
+          "FCM Error:",
+          result.error?.code,
+          result.error?.message
+        );
+
         if (
-          errCode === "messaging/invalid-registration-token" ||
-          errCode === "messaging/registration-token-not-registered"
+          result.error?.code ===
+          "messaging/invalid-registration-token" ||
+          result.error?.code ===
+          "messaging/registration-token-not-registered"
         ) {
-          tokensToDelete.push(tokens[idx]);
+          invalidTokens.push(tokens[index]);
         }
       }
     });
 
-    if (tokensToDelete.length > 0) {
-      console.log(`FCM purging ${tokensToDelete.length} invalid tokens...`);
-      await Promise.all(tokensToDelete.map((token) => deleteDeviceToken(token)));
+    if (invalidTokens.length > 0) {
+      console.log("Removing invalid tokens...");
+
+      await Promise.all(
+        invalidTokens.map((token) =>
+          deleteDeviceToken(token)
+        )
+      );
     }
 
     return NextResponse.json({
       success: true,
       sentCount: response.successCount,
       failureCount: response.failureCount,
+      invalidTokensRemoved: invalidTokens.length,
     });
-  } catch (error: any) {
-    console.error("FCM delivery exception:", error);
+  } catch (err: any) {
+    console.error("Push notification error:", err);
+
     return NextResponse.json(
-      { success: false, error: error?.message || "Internal server error" },
-      { status: 500 }
+      {
+        success: false,
+        error: err.message,
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
