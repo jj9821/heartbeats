@@ -48,8 +48,9 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          senderId: profile.uid,
           receiverId: partner.uid,
-          senderName: profile.settings?.nickname || profile.name,
+          message: "",
         }),
       });
 

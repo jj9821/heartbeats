@@ -29,7 +29,7 @@ create table public.heartbeats (
 create table public.device_tokens (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references public.users(id) on delete cascade not null,
-  token text not null,
+  token text unique not null,
   platform text not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

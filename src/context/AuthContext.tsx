@@ -18,6 +18,7 @@ import {
 } from "@/lib/database";
 import { requestAndSaveFCMToken } from "@/lib/messaging";
 import { UserProfile } from "@/types";
+import { toast } from "sonner";
 
 interface AuthContextValue {
   user: User | null;
@@ -117,13 +118,33 @@ export function AuthProvider({
     };
   }, [loadProfile]);
 
-  // Save FCM token for notifications (Stubbed/no-op for now)
+  // Save FCM token and set up foreground message listener
   useEffect(() => {
     if (!user) return;
 
     requestAndSaveFCMToken(user.id).catch((err) =>
       console.warn("FCM setup failed:", err)
     );
+
+    let unsubscribe: (() => void) | null = null;
+
+    import("@/lib/messaging").then(({ onForegroundMessage }) => {
+      onForegroundMessage((payload) => {
+        toast.info(payload.title, {
+          description: payload.body,
+          icon: "❤️",
+          duration: 5000,
+        });
+      }).then((unsub) => {
+        unsubscribe = unsub;
+      });
+    }).catch((err) => {
+      console.error("Failed to setup foreground listener:", err);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [user]);
 
   // Visibility and unload handlers for online/offline status

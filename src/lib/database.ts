@@ -394,3 +394,64 @@ export function listenForHeartbeats(
     supabase.removeChannel(channel);
   };
 }
+
+/**
+ * Save or update a device token in Supabase.
+ */
+export async function saveDeviceToken(
+  userId: string,
+  token: string,
+  platform: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("device_tokens")
+    .upsert(
+      {
+        user_id: userId,
+        token: token,
+        platform: platform,
+        created_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "token",
+      }
+    );
+
+  if (error) {
+    logError("Error saving device token", error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a device token from Supabase.
+ */
+export async function deleteDeviceToken(token: string): Promise<void> {
+  const { error } = await supabase
+    .from("device_tokens")
+    .delete()
+    .eq("token", token);
+
+  if (error) {
+    logError("Error deleting device token", error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieve all FCM device tokens for a specific user.
+ */
+export async function getUserDeviceTokens(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("device_tokens")
+    .select("token")
+    .eq("user_id", userId);
+
+  if (error) {
+    logError("Error fetching user device tokens", error);
+    return [];
+  }
+
+  return (data || []).map((row: any) => row.token);
+}
+
