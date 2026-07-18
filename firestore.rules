@@ -1,0 +1,55 @@
+// =============================================================================
+// Heartbeat PWA — Firestore Security Rules
+// =============================================================================
+// Deploy these rules to Firebase:
+//   firebase deploy --only firestore:rules
+//
+// Or paste them into the Firebase Console → Firestore → Rules tab.
+// =============================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Users Collection
+    // =========================================================================
+    match /users/{userId} {
+      // Anyone authenticated can read any user (needed for pairing lookup)
+      allow read: if request.auth != null;
+
+      // Users can only create/update their own document
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && (
+        // User can update their own profile
+        request.auth.uid == userId ||
+        // Partner can update the partnerId field (for pairing)
+        request.auth.uid == resource.data.partnerId ||
+        // Allow pairing: someone setting this user as their partner
+        request.resource.data.partnerId == request.auth.uid
+      );
+
+      // Users can only delete their own document
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // =========================================================================
+    // Signals Collection
+    // =========================================================================
+    match /signals/{signalId} {
+      // Only sender or receiver can read signals
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.senderId ||
+        request.auth.uid == resource.data.receiverId
+      );
+
+      // Only authenticated users can create signals, and senderId must match
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.senderId;
+
+      // Signals are immutable — no updates or deletes
+      allow update, delete: if false;
+    }
+  }
+}
